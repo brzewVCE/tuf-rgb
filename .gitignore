@@ -1,0 +1,17 @@
+# Packaging and temporary files
+*.zip
+*.tar.gz
+*.tar.xz
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# State files
+state.json
+
+# OS files
+.DS_Store
+*.swp
+*~

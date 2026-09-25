@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""
+TUF-RGB Backend Helper: Communicates with ITE5570 LampArray controller.
+Packaged for GNOME Shell Extension tuf-rgb.
+"""
+
+import sys
+import os
+import glob
+import fcntl
+import json
+from pathlib import Path
+
+COLOR_PRESETS = [
+    ("red", (255, 0, 0)),
+    ("orange", (255, 102, 0)),
+    ("yellow", (255, 204, 0)),
+    ("green", (0, 230, 0)),
+    ("cyan", (0, 213, 255)),
+    ("blue", (0, 85, 255)),
+    ("purple", (153, 0, 255)),
+    ("white", (255, 255, 255)),
+]
+
+CONFIG_DIR = Path.home() / ".config" / "tuf-rgb"
+STATE_FILE = CONFIG_DIR / "state.json"
+
+HIDIOCSFEATURE_BASE = 0xC0004806
+
+def hidiocsfeature(length: int) -> int:
+    return HIDIOCSFEATURE_BASE | (length << 16)
+
+def find_hidraw():
+    for p in glob.glob("/sys/class/hidraw/hidraw*"):
+        try:
+            uevent = open(f"{p}/device/uevent").read()
+            if "0B05:000019B6" in uevent or "ITE5570" in uevent:
+                return f"/dev/{os.path.basename(p)}"
+        except Exception:
+            continue
+    return None
+
+def check_permission(dev_path):
+    if not os.path.exists(dev_path):
+        return "missing"
+    if os.access(dev_path, os.R_OK | os.W_OK):
+        return "ok"
+    return "denied"
+
+def load_state():
+    if STATE_FILE.exists():
+        try:
+            return json.loads(STATE_FILE.read_text())
+        except Exception:
+            pass
+    return {"index": 0, "r": 255, "g": 0, "b": 0, "intensity": 255, "on": True}
+
+def save_state(state):
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        STATE_FILE.write_text(json.dumps(state, indent=2))
+    except Exception:
+        pass
+
+def parse_color(arg):
+    arg = arg.strip().lower()
+    for name, (r, g, b) in COLOR_PRESETS:
+        if arg == name:
+            return r, g, b
+    clean = arg.replace("#", "")
+    if len(clean) == 6:
+        try:
+            return int(clean[0:2], 16), int(clean[2:4], 16), int(clean[4:6], 16)
+        except ValueError:
+            pass
+    return None
+
+def send_rgb(dev_path, r, g, b, intensity=255, autonomous=False):
+    fd = os.open(dev_path, os.O_RDWR | os.O_CLOEXEC)
+    try:
+        try:
+            arm_pkt = bytes([0x5F, 0x01] + [0x00] * 49)
+            fcntl.ioctl(fd, hidiocsfeature(len(arm_pkt)), arm_pkt)
+        except Exception:
+            pass
+
+        if autonomous:
+            ctrl_pkt = bytes([0x46, 0x01])
+            fcntl.ioctl(fd, hidiocsfeature(len(ctrl_pkt)), ctrl_pkt)
+            return
+
+        ctrl_pkt = bytes([0x46, 0x00])
+        fcntl.ioctl(fd, hidiocsfeature(len(ctrl_pkt)), ctrl_pkt)
+
+        color_pkt = bytes([
+            0x45, 0x01, 0x00, 0x00, 0x00, 0x00,
+            max(0, min(255, r)),
+            max(0, min(255, g)),
+            max(0, min(255, b)),
+            max(0, min(255, intensity))
+        ])
+        fcntl.ioctl(fd, hidiocsfeature(len(color_pkt)), color_pkt)
+    finally:
+        os.close(fd)
+
+def main():
+    dev = find_hidraw()
+    if not dev:
+        sys.exit(3)  # No device
+
+    args = sys.argv[1:]
+    if not args:
+        sys.exit(0)
+
+    cmd = args[0].lower()
+
+    if cmd == "check":
+        status = check_permission(dev)
+        if status == "ok":
+            sys.exit(0)
+        elif status == "denied":
+            sys.exit(2)
+        else:
+            sys.exit(3)
+
+    if check_permission(dev) != "ok":
+        sys.exit(2)  # Permission denied
+
+    state = load_state()
+
+    try:
+        if cmd == "next":
+            idx = (state.get("index", -1) + 1) % len(COLOR_PRESETS)
+            name, (r, g, b) = COLOR_PRESETS[idx]
+            intensity = state.get("intensity", 255)
+            send_rgb(dev, r, g, b, intensity)
+            state["index"] = idx
+            state["r"], state["g"], state["b"] = r, g, b
+            state["on"] = True
+            save_state(state)
+
+        elif cmd == "prev":
+            idx = (state.get("index", 1) - 1) % len(COLOR_PRESETS)
+            name, (r, g, b) = COLOR_PRESETS[idx]
+            intensity = state.get("intensity", 255)
+            send_rgb(dev, r, g, b, intensity)
+            state["index"] = idx
+            state["r"], state["g"], state["b"] = r, g, b
+            state["on"] = True
+            save_state(state)
+
+        elif cmd == "toggle":
+            if state.get("on", True):
+                send_rgb(dev, 0, 0, 0, 0)
+                state["on"] = False
+            else:
+                r, g, b = state.get("r", 255), state.get("g", 0), state.get("b", 0)
+                intensity = state.get("intensity", 255)
+                send_rgb(dev, r, g, b, intensity)
+                state["on"] = True
+            save_state(state)
+
+        elif cmd == "auto":
+            send_rgb(dev, 0, 0, 0, 0, autonomous=True)
+
+        elif cmd == "off":
+            send_rgb(dev, 0, 0, 0, 0)
+            state["on"] = False
+            save_state(state)
+
+        elif cmd == "brightness" and len(args) > 1:
+            val = int(args[1])
+            intensity = max(0, min(255, int(val * 255 / 100)))
+            r, g, b = state.get("r", 255), state.get("g", 0), state.get("b", 0)
+            send_rgb(dev, r, g, b, intensity)
+            state["intensity"] = intensity
+            save_state(state)
+
+        else:
+            color = parse_color(cmd)
+            if color:
+                r, g, b = color
+                intensity = state.get("intensity", 255)
+                send_rgb(dev, r, g, b, intensity)
+                state["r"], state["g"], state["b"] = r, g, b
+                state["on"] = True
+                save_state(state)
+            else:
+                sys.exit(1)
+
+    except PermissionError:
+        sys.exit(2)
+    except Exception:
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,12 @@
+{
+  "name": "TUF Keyboard RGB",
+  "description": "Integrates RGB keyboard backlight color controls into the GNOME Quick Settings menu for ASUS TUF Gaming laptops.",
+  "uuid": "tuf-rgb@bthos.github.com",
+  "url": "https://github.com/bthos/tuf-rgb",
+  "shell-version": [
+    "45",
+    "46",
+    "47"
+  ],
+  "version": 1
+}
