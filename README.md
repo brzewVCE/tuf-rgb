@@ -37,7 +37,7 @@ Install directly from [extensions.gnome.org](https://extensions.gnome.org/extens
 
 1. Clone the repository into your local extensions directory:
    ```bash
-   git clone https://github.com/bthos/tuf-rgb.git ~/.local/share/gnome-shell/extensions/tuf-rgb@bthos.github.com
+   git clone https://github.com/brzewVCE/tuf-rgb.git ~/.local/share/gnome-shell/extensions/tuf-rgb@brzewvce.github.com
    ```
 
 2. Restart GNOME Shell:
@@ -46,7 +46,7 @@ Install directly from [extensions.gnome.org](https://extensions.gnome.org/extens
 
 3. Enable the extension:
    ```bash
-   gnome-extensions enable tuf-rgb@bthos.github.com
+   gnome-extensions enable tuf-rgb@brzewvce.github.com
    ```
 
 4. Open the Quick Settings menu, expand the **Keyboard** toggle, and click any color. When prompted by the system dialog, enter your password to grant hardware access once.
@@ -60,7 +60,7 @@ You can map any custom key combination (e.g. `Super + F4` or `Ctrl + Alt + K`) t
 1. Open **Settings -> Keyboard -> Keyboard Shortcuts -> Custom Shortcuts**.
 2. Click **+** and set:
    - **Name:** `Keyboard Next Color`
-   - **Command:** `python3 ~/.local/share/gnome-shell/extensions/tuf-rgb@bthos.github.com/bin/tuf-rgb next`
+   - **Command:** `python3 ~/.local/share/gnome-shell/extensions/tuf-rgb@brzewvce.github.com/bin/tuf-rgb next`
    - **Shortcut:** Your preferred key combination.
 
 ---
