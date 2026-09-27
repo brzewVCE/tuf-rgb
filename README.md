@@ -12,11 +12,12 @@ Designed specifically for 2024+ ASUS laptops equipped with the **ITE5570 HID Lam
 ## Features
 
 - **Native Quick Settings Integration:** Adds an elegant, compact color palette directly under the existing "Keyboard" brightness menu.
-- **Adwaita Design:** Follows GNOME Human Interface Guidelines with rounded square swatches, subtle shadows, and hover effects.
-- **One-Click Color Switching:** 8 vibrant presets (Red, Orange, Yellow, Green, Cyan, Blue, Purple, White) plus a "Next Color" action.
-- **Factory ASUS Mode:** Toggle back to the autonomous firmware Aura profile at any time.
-- **Zero-Terminal Setup (Polkit):** Prompts for administrator authentication via the standard system dialog on first run—no manual `udev` configuration required.
-- **Asynchronous & Lightweight:** No background daemons, zero battery drain, and non-blocking I/O via `Gio.Subprocess`.
+- **Modern GNOME & Libadwaita Design:** Follows GNOME Human Interface Guidelines with rounded swatches, smooth 3px hover glow, and a dedicated Libadwaita Preferences dialog.
+- **One-Click Color Switching:** 8 vibrant static presets (Red, Orange, Yellow, Green, Cyan, Blue, Purple, White) plus an integrated graphical **Aura (Auto)** tile to return to firmware autonomous animation.
+- **State Persistence:** Automatically saves your color selection and restores it across logins, reboots, and sleep/wake suspend cycles (`PrepareForSleep` DBus integration).
+- **Non-Intrusive Permission Handling:** Instead of intrusive Polkit popups on every color change, unprivileged attempts generate a standard GNOME notification with a `[Settings]` button to grant persistent access once.
+- **Libadwaita Preferences Window:** Configure and manage `/etc/udev/rules.d/99-tuf-rgb.rules` with a single click, view detected device paths (e.g. `/dev/hidraw2`), and inspect permission health.
+- **Zero-Daemon Overhead:** Operates with 0 MB background RAM overhead. Hardware commands execute asynchronously via `Gio.Subprocess` without blocking the GNOME Shell UI.
 
 ---
 
@@ -24,7 +25,7 @@ Designed specifically for 2024+ ASUS laptops equipped with the **ITE5570 HID Lam
 
 - **ASUS TUF Gaming A16** (FA607 series, e.g. FA607NU, FA607PV)
 - **ASUS TUF Gaming A18** (FA808 series)
-- ASUS laptops with **ITE5570** keyboard controller (`0B05:19B6` on `i2c-ITE5570:00`)
+- ASUS laptops with the **ITE5570** LampArray keyboard controller (`0B05:19B6` on `i2c-ITE5570:00`, Usage Page `0x59`)
 
 ---
 
@@ -49,19 +50,26 @@ Install directly from [extensions.gnome.org](https://extensions.gnome.org/extens
    gnome-extensions enable tuf-rgb@brzewvce.github.com
    ```
 
-4. Open the Quick Settings menu, expand the **Keyboard** toggle, and click any color. When prompted by the system dialog, enter your password to grant hardware access once.
+4. Open the Quick Settings menu, expand the **Keyboard** toggle, and click **RGB Settings** (or click any color swatch and use the `[Settings]` notification button). In the Preferences window, click **Install** to grant persistent hardware access via `udev`.
 
 ---
 
-## Optional: Keyboard Shortcut
+## Keyboard Shortcuts & CLI
 
-You can map any custom key combination (e.g. `Super + F4` or `Ctrl + Alt + K`) to cycle through colors:
+The extension includes a standalone command-line helper at `bin/tuf-rgb`. You can map any custom key combination (e.g. `Super + F4` or `Ctrl + Alt + K`) to cycle through colors or toggle backlight:
 
 1. Open **Settings -> Keyboard -> Keyboard Shortcuts -> Custom Shortcuts**.
-2. Click **+** and set:
+2. Click **+** and configure:
    - **Name:** `Keyboard Next Color`
    - **Command:** `python3 ~/.local/share/gnome-shell/extensions/tuf-rgb@brzewvce.github.com/bin/tuf-rgb next`
    - **Shortcut:** Your preferred key combination.
+
+Other available subcommands:
+- `bin/tuf-rgb prev` - Switch to previous color preset
+- `bin/tuf-rgb auto` - Switch to ASUS Aura autonomous hardware mode
+- `bin/tuf-rgb toggle` - Turn backlight on/off
+- `bin/tuf-rgb restore` - Reapply saved color from state configuration
+- `bin/tuf-rgb #ff0077` - Set custom hex color
 
 ---
 
