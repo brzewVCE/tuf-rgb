@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Przemek
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """
 TUF-RGB Backend Helper: Communicates with ITE5570 LampArray controller.
 Packaged for GNOME Shell Extension tuf-rgb.
 """
 
-import sys
-import os
-import glob
 import fcntl
+import glob
 import json
+import os
+import sys
+import time
 from pathlib import Path
 
 COLOR_PRESETS = [
@@ -27,40 +31,66 @@ STATE_FILE = CONFIG_DIR / "state.json"
 
 HIDIOCSFEATURE_BASE = 0xC0004806
 
+
 def hidiocsfeature(length: int) -> int:
     return HIDIOCSFEATURE_BASE | (length << 16)
 
+
 def find_hidraw():
-    for p in glob.glob("/sys/class/hidraw/hidraw*"):
+    for p in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
         try:
-            uevent = open(f"{p}/device/uevent").read()
-            if "0B05:000019B6" in uevent or "ITE5570" in uevent:
-                return f"/dev/{os.path.basename(p)}"
+            uevent_path = os.path.join(p, "device", "uevent")
+            if not os.path.exists(uevent_path):
+                continue
+            with open(uevent_path, "r", encoding="utf-8", errors="ignore") as f:
+                uevent = f.read()
+            if "0B05:000019B6" in uevent or "0B05:19B6" in uevent or "ITE5570" in uevent:
+                dev_node = f"/dev/{os.path.basename(p)}"
+                if os.path.exists(dev_node):
+                    return dev_node
         except Exception:
             continue
     return None
 
+
 def check_permission(dev_path):
-    if not os.path.exists(dev_path):
+    if not dev_path or not os.path.exists(dev_path):
         return "missing"
     if os.access(dev_path, os.R_OK | os.W_OK):
         return "ok"
     return "denied"
 
+
 def load_state():
+    defaults = {
+        "index": 0,
+        "r": 255,
+        "g": 0,
+        "b": 0,
+        "intensity": 255,
+        "on": True,
+        "auto": False,
+    }
     if STATE_FILE.exists():
         try:
-            return json.loads(STATE_FILE.read_text())
+            data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                defaults.update(data)
+                return defaults
         except Exception:
             pass
-    return {"index": 0, "r": 255, "g": 0, "b": 0, "intensity": 255, "on": True}
+    return defaults
+
 
 def save_state(state):
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(json.dumps(state, indent=2))
+        tmp_file = CONFIG_DIR / f"state.json.tmp.{os.getpid()}"
+        tmp_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        tmp_file.replace(STATE_FILE)
     except Exception:
         pass
+
 
 def parse_color(arg):
     arg = arg.strip().lower()
@@ -74,6 +104,14 @@ def parse_color(arg):
         except ValueError:
             pass
     return None
+
+
+def find_preset_index(r, g, b):
+    for idx, (_, (pr, pg, pb)) in enumerate(COLOR_PRESETS):
+        if (r, g, b) == (pr, pg, pb):
+            return idx
+    return None
+
 
 def send_rgb(dev_path, r, g, b, intensity=255, autonomous=False):
     fd = os.open(dev_path, os.O_RDWR | os.O_CLOEXEC)
@@ -97,24 +135,31 @@ def send_rgb(dev_path, r, g, b, intensity=255, autonomous=False):
             max(0, min(255, r)),
             max(0, min(255, g)),
             max(0, min(255, b)),
-            max(0, min(255, intensity))
+            max(0, min(255, intensity)),
         ])
         fcntl.ioctl(fd, hidiocsfeature(len(color_pkt)), color_pkt)
     finally:
         os.close(fd)
 
-def main():
-    dev = find_hidraw()
-    if not dev:
-        sys.exit(3)  # No device
 
+def main():
     args = sys.argv[1:]
     if not args:
         sys.exit(0)
 
     cmd = args[0].lower()
 
+    if cmd == "device":
+        dev = find_hidraw()
+        if dev:
+            print(dev)
+            sys.exit(0)
+        sys.exit(3)
+
     if cmd == "check":
+        dev = find_hidraw()
+        if not dev:
+            sys.exit(3)
         status = check_permission(dev)
         if status == "ok":
             sys.exit(0)
@@ -123,27 +168,54 @@ def main():
         else:
             sys.exit(3)
 
-    if cmd == "device":
-        print(dev)
-        sys.exit(0)
+    # Optional retry support for standalone invocations
+    retries = 1
+    retry_delay = 0.5
+    if cmd == "restore":
+        if "--retries" in args:
+            try:
+                r_idx = args.index("--retries")
+                retries = max(1, int(args[r_idx + 1]))
+            except (ValueError, IndexError):
+                retries = 1
+        if "--delay" in args:
+            try:
+                d_idx = args.index("--delay")
+                retry_delay = max(0.1, float(args[d_idx + 1]))
+            except (ValueError, IndexError):
+                retry_delay = 0.5
 
-    if check_permission(dev) != "ok":
-        sys.exit(2)  # Permission denied
+    dev = None
+    perm_status = "missing"
+    for attempt in range(retries):
+        dev = find_hidraw()
+        if dev:
+            perm_status = check_permission(dev)
+            if perm_status == "ok":
+                break
+        if attempt < retries - 1:
+            time.sleep(retry_delay)
+
+    if not dev or perm_status == "missing":
+        sys.exit(3)
+
+    if perm_status == "denied":
+        sys.exit(2)
 
     state = load_state()
 
     try:
         if cmd == "restore":
-            if state.get("auto", False):
+            if not state.get("on", True):
+                send_rgb(dev, 0, 0, 0, 0)
+            elif state.get("auto", False):
                 send_rgb(dev, 0, 0, 0, 0, autonomous=True)
-            elif state.get("on", True):
+            else:
                 r = state.get("r", 255)
                 g = state.get("g", 0)
                 b = state.get("b", 0)
                 intensity = state.get("intensity", 255)
                 send_rgb(dev, r, g, b, intensity)
-            else:
-                send_rgb(dev, 0, 0, 0, 0)
             sys.exit(0)
 
         elif cmd == "next":
@@ -173,29 +245,43 @@ def main():
                 send_rgb(dev, 0, 0, 0, 0)
                 state["on"] = False
             else:
-                r, g, b = state.get("r", 255), state.get("g", 0), state.get("b", 0)
-                intensity = state.get("intensity", 255)
-                send_rgb(dev, r, g, b, intensity)
+                if state.get("auto", False):
+                    send_rgb(dev, 0, 0, 0, 0, autonomous=True)
+                else:
+                    r = state.get("r", 255)
+                    g = state.get("g", 0)
+                    b = state.get("b", 0)
+                    intensity = state.get("intensity", 255)
+                    send_rgb(dev, r, g, b, intensity)
                 state["on"] = True
             save_state(state)
 
         elif cmd == "auto":
             send_rgb(dev, 0, 0, 0, 0, autonomous=True)
             state["auto"] = True
+            state["on"] = True
             save_state(state)
 
         elif cmd == "off":
             send_rgb(dev, 0, 0, 0, 0)
             state["on"] = False
-            state["auto"] = False
             save_state(state)
 
         elif cmd == "brightness" and len(args) > 1:
             val = int(args[1])
             intensity = max(0, min(255, int(val * 255 / 100)))
-            r, g, b = state.get("r", 255), state.get("g", 0), state.get("b", 0)
-            send_rgb(dev, r, g, b, intensity)
-            state["intensity"] = intensity
+            if intensity == 0:
+                send_rgb(dev, 0, 0, 0, 0)
+                state["on"] = False
+                state["intensity"] = 0
+            else:
+                r = state.get("r", 255)
+                g = state.get("g", 0)
+                b = state.get("b", 0)
+                send_rgb(dev, r, g, b, intensity)
+                state["intensity"] = intensity
+                state["on"] = True
+                state["auto"] = False
             save_state(state)
 
         else:
@@ -207,14 +293,27 @@ def main():
                 state["r"], state["g"], state["b"] = r, g, b
                 state["on"] = True
                 state["auto"] = False
+                preset_idx = find_preset_index(r, g, b)
+                if preset_idx is not None:
+                    state["index"] = preset_idx
                 save_state(state)
             else:
                 sys.exit(1)
 
     except PermissionError:
         sys.exit(2)
+    except (FileNotFoundError, ProcessLookupError):
+        sys.exit(3)
+    except OSError as e:
+        if e.errno in (13, 1):
+            sys.exit(2)
+        elif e.errno in (2, 19):
+            sys.exit(3)
+        else:
+            sys.exit(1)
     except Exception:
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

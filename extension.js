@@ -25,6 +25,9 @@ const PALETTE = [
     {name: 'White', hex: '#ffffff', cmd: 'white'},
 ];
 
+const RESTORE_RETRY_DELAYS_MS = [500, 1500, 3000];
+const INITIAL_WAKE_DELAY_MS = 500;
+
 /**
  * Custom PopupBaseMenuItem displaying a compact horizontal row of color swatches.
  */
@@ -89,6 +92,7 @@ class KeyboardColorSection extends PopupMenu.PopupMenuSection {
         this._extension = extension;
         this._path = extension.path;
         this._notifCooldown = false;
+        this._notifTimeoutId = null;
 
         this.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(_('Color')));
         this.addMenuItem(new ColorPaletteItem(cmd => this._runCmd(cmd), this._path));
@@ -127,8 +131,14 @@ class KeyboardColorSection extends PopupMenu.PopupMenuSection {
             return;
 
         this._notifCooldown = true;
-        GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 4, () => {
+        if (this._notifTimeoutId) {
+            GLib.source_remove(this._notifTimeoutId);
+            this._notifTimeoutId = null;
+        }
+
+        this._notifTimeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 4, () => {
             this._notifCooldown = false;
+            this._notifTimeoutId = null;
             return GLib.SOURCE_REMOVE;
         });
 
@@ -195,6 +205,14 @@ class KeyboardColorSection extends PopupMenu.PopupMenuSection {
             console.error(`[tuf-rgb] Failed to open preferences: ${e.message}`);
         }
     }
+
+    destroy() {
+        if (this._notifTimeoutId) {
+            GLib.source_remove(this._notifTimeoutId);
+            this._notifTimeoutId = null;
+        }
+        super.destroy();
+    }
 }
 
 /**
@@ -206,24 +224,54 @@ class KeyboardColorManager {
         this._retryCount = 0;
         this._toggle = null;
         this._section = null;
-        this._retryTimeoutId = null;
+        this._injectTimeoutId = null;
         this._sleepTimeoutId = null;
+        this._restoreTimeoutId = null;
         this._sleepSignalId = null;
 
         this._findAndInject();
-        this._restoreColor();
+        this._restoreColor(0);
         this._setupSleepListener();
     }
 
-    _restoreColor() {
+    _restoreColor(attempt = 0) {
+        if (this._restoreTimeoutId) {
+            GLib.source_remove(this._restoreTimeoutId);
+            this._restoreTimeoutId = null;
+        }
+
         const bin = `${this._extension.path}/bin/tuf-rgb`;
         try {
             const proc = Gio.Subprocess.new(
                 [bin, 'restore'],
                 Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE
             );
-            proc.wait_async(null, null);
-        } catch (e) {}
+            proc.wait_async(null, (p, res) => {
+                try {
+                    p.wait_finish(res);
+                    const exitCode = p.get_exit_status();
+                    if (exitCode === 0) {
+                        return;
+                    }
+                    console.warn(`[tuf-rgb] Restore attempt ${attempt + 1} exited with status ${exitCode}`);
+                } catch (e) {
+                    console.warn(`[tuf-rgb] Restore attempt ${attempt + 1} process error: ${e.message}`);
+                }
+
+                if (attempt < RESTORE_RETRY_DELAYS_MS.length) {
+                    const delay = RESTORE_RETRY_DELAYS_MS[attempt];
+                    this._restoreTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+                        this._restoreTimeoutId = null;
+                        this._restoreColor(attempt + 1);
+                        return GLib.SOURCE_REMOVE;
+                    });
+                } else {
+                    console.error('[tuf-rgb] Color restore failed after all retry attempts');
+                }
+            });
+        } catch (e) {
+            console.error(`[tuf-rgb] Failed to spawn restore process: ${e.message}`);
+        }
     }
 
     _setupSleepListener() {
@@ -237,15 +285,34 @@ class KeyboardColorManager {
                 Gio.DBusSignalFlags.NONE,
                 (conn, sender, path, iface, signal, params) => {
                     const goingToSleep = params.get_child_value(0).get_boolean();
-                    if (!goingToSleep) {
-                        if (this._sleepTimeoutId)
+                    if (goingToSleep) {
+                        if (this._sleepTimeoutId) {
                             GLib.source_remove(this._sleepTimeoutId);
-
-                        this._sleepTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => {
                             this._sleepTimeoutId = null;
-                            this._restoreColor();
-                            return GLib.SOURCE_REMOVE;
-                        });
+                        }
+                        if (this._restoreTimeoutId) {
+                            GLib.source_remove(this._restoreTimeoutId);
+                            this._restoreTimeoutId = null;
+                        }
+                    } else {
+                        if (this._sleepTimeoutId) {
+                            GLib.source_remove(this._sleepTimeoutId);
+                            this._sleepTimeoutId = null;
+                        }
+                        if (this._restoreTimeoutId) {
+                            GLib.source_remove(this._restoreTimeoutId);
+                            this._restoreTimeoutId = null;
+                        }
+
+                        this._sleepTimeoutId = GLib.timeout_add(
+                            GLib.PRIORITY_DEFAULT,
+                            INITIAL_WAKE_DELAY_MS,
+                            () => {
+                                this._sleepTimeoutId = null;
+                                this._restoreColor(0);
+                                return GLib.SOURCE_REMOVE;
+                            }
+                        );
                     }
                 }
             );
@@ -260,8 +327,8 @@ class KeyboardColorManager {
             this._inject(toggle);
         } else if (this._retryCount < 10) {
             this._retryCount++;
-            this._retryTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
-                this._retryTimeoutId = null;
+            this._injectTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+                this._injectTimeoutId = null;
                 this._findAndInject();
                 return GLib.SOURCE_REMOVE;
             });
@@ -306,14 +373,19 @@ class KeyboardColorManager {
     }
 
     destroy() {
-        if (this._retryTimeoutId) {
-            GLib.source_remove(this._retryTimeoutId);
-            this._retryTimeoutId = null;
+        if (this._injectTimeoutId) {
+            GLib.source_remove(this._injectTimeoutId);
+            this._injectTimeoutId = null;
         }
 
         if (this._sleepTimeoutId) {
             GLib.source_remove(this._sleepTimeoutId);
             this._sleepTimeoutId = null;
+        }
+
+        if (this._restoreTimeoutId) {
+            GLib.source_remove(this._restoreTimeoutId);
+            this._restoreTimeoutId = null;
         }
 
         if (this._sleepSignalId) {
