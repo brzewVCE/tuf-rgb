@@ -123,13 +123,30 @@ def main():
         else:
             sys.exit(3)
 
+    if cmd == "device":
+        print(dev)
+        sys.exit(0)
+
     if check_permission(dev) != "ok":
         sys.exit(2)  # Permission denied
 
     state = load_state()
 
     try:
-        if cmd == "next":
+        if cmd == "restore":
+            if state.get("auto", False):
+                send_rgb(dev, 0, 0, 0, 0, autonomous=True)
+            elif state.get("on", True):
+                r = state.get("r", 255)
+                g = state.get("g", 0)
+                b = state.get("b", 0)
+                intensity = state.get("intensity", 255)
+                send_rgb(dev, r, g, b, intensity)
+            else:
+                send_rgb(dev, 0, 0, 0, 0)
+            sys.exit(0)
+
+        elif cmd == "next":
             idx = (state.get("index", -1) + 1) % len(COLOR_PRESETS)
             name, (r, g, b) = COLOR_PRESETS[idx]
             intensity = state.get("intensity", 255)
@@ -137,6 +154,7 @@ def main():
             state["index"] = idx
             state["r"], state["g"], state["b"] = r, g, b
             state["on"] = True
+            state["auto"] = False
             save_state(state)
 
         elif cmd == "prev":
@@ -147,6 +165,7 @@ def main():
             state["index"] = idx
             state["r"], state["g"], state["b"] = r, g, b
             state["on"] = True
+            state["auto"] = False
             save_state(state)
 
         elif cmd == "toggle":
@@ -162,10 +181,13 @@ def main():
 
         elif cmd == "auto":
             send_rgb(dev, 0, 0, 0, 0, autonomous=True)
+            state["auto"] = True
+            save_state(state)
 
         elif cmd == "off":
             send_rgb(dev, 0, 0, 0, 0)
             state["on"] = False
+            state["auto"] = False
             save_state(state)
 
         elif cmd == "brightness" and len(args) > 1:
@@ -184,6 +206,7 @@ def main():
                 send_rgb(dev, r, g, b, intensity)
                 state["r"], state["g"], state["b"] = r, g, b
                 state["on"] = True
+                state["auto"] = False
                 save_state(state)
             else:
                 sys.exit(1)
