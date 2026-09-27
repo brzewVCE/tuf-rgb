@@ -1,30 +1,54 @@
 .tuf-rgb-palette-item {
-    padding: 6px 10px 10px 10px;
+    padding: 6px 0 10px 0;
+    background-color: transparent !important;
 }
 
 .tuf-rgb-swatch-box {
-    spacing: 8px;
+    spacing: 6px;
 }
 
 .tuf-rgb-swatch {
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
-    min-height: 32px;
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    min-height: 30px;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
-    transition-duration: 120ms;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    transition-duration: 200ms;
 }
 
 .tuf-rgb-swatch:hover {
-    border-color: #ffffff;
-    box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
-    transform: scale(1.08);
+    border-color: rgba(255, 255, 255, 0.6);
+    box-shadow: 0 0 3px rgba(255, 255, 255, 0.3);
+    transform: scale(1.03);
 }
 
 .tuf-rgb-swatch:focus,
 .tuf-rgb-swatch:active {
-    border: 2px solid #ffffff;
-    box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+    border-color: #ffffff;
+    box-shadow: 0 0 3px rgba(255, 255, 255, 0.45);
+    transform: scale(0.97);
 }
+
+.tuf-rgb-auto-swatch {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    border: none;
+    background-color: transparent !important;
+    background-size: contain;
+}
+
+.tuf-rgb-auto-swatch:hover {
+    box-shadow: 0 0 3px rgba(255, 255, 255, 0.35);
+    transform: scale(1.03);
+}
+
+.tuf-rgb-auto-swatch:focus,
+.tuf-rgb-auto-swatch:active {
+    box-shadow: 0 0 3px rgba(255, 255, 255, 0.5);
+    transform: scale(0.97);
+}
+
