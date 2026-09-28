@@ -29,7 +29,7 @@ COLOR_PRESETS = [
     ("white", (255, 255, 255)),
 ]
 
-CONFIG_DIR = Path.home() / ".config" / "tuf-rgb"
+CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tuf-rgb"
 STATE_FILE = CONFIG_DIR / "state.json"
 PID_FILE = CONFIG_DIR / "effect.pid"
 
@@ -37,10 +37,12 @@ HIDIOCSFEATURE_BASE = 0xC0004806
 
 
 def hidiocsfeature(length: int) -> int:
+    """Construct ioctl feature request number for the given report length."""
     return HIDIOCSFEATURE_BASE | (length << 16)
 
 
-def find_hidraw():
+def find_hidraw() -> str | None:
+    """Scan /sys/class/hidraw to locate the ITE5570 LampArray controller node."""
     for p in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
         try:
             uevent_path = os.path.join(p, "device", "uevent")
@@ -57,7 +59,8 @@ def find_hidraw():
     return None
 
 
-def check_permission(dev_path):
+def check_permission(dev_path: str | None) -> str:
+    """Check read/write permissions on the given hidraw node ('ok', 'denied', or 'missing')."""
     if not dev_path or not os.path.exists(dev_path):
         return "missing"
     if os.access(dev_path, os.R_OK | os.W_OK):
@@ -65,7 +68,8 @@ def check_permission(dev_path):
     return "denied"
 
 
-def load_state():
+def load_state() -> dict:
+    """Load saved backlight configuration state from disk with safe defaults."""
     defaults = {
         "index": 0,
         "color_name": "red",
@@ -89,7 +93,8 @@ def load_state():
     return defaults
 
 
-def save_state(state):
+def save_state(state: dict) -> None:
+    """Atomically persist state dictionary to disk using a unique temporary file."""
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         tmp_file = CONFIG_DIR / f"state.json.tmp.{os.getpid()}"
@@ -99,7 +104,8 @@ def save_state(state):
         pass
 
 
-def is_daemon_running():
+def is_daemon_running() -> int | None:
+    """Check if the effect background daemon is currently alive; return its PID or None."""
     if PID_FILE.exists():
         try:
             pid = int(PID_FILE.read_text(encoding="utf-8").strip())
@@ -113,7 +119,8 @@ def is_daemon_running():
     return None
 
 
-def stop_effect_daemon():
+def stop_effect_daemon() -> None:
+    """Gracefully stop any running effect background daemon via SIGTERM."""
     pid = is_daemon_running()
     if pid:
         try:
@@ -296,7 +303,8 @@ def spawn_effect_daemon(dev_path):
     sys.exit(0)
 
 
-def parse_color(arg):
+def parse_color(arg: str) -> tuple[int, int, int, str] | None:
+    """Parse a color name preset or hex string (#RRGGBB); returns (r, g, b, name)."""
     arg = arg.strip().lower()
     for name, (r, g, b) in COLOR_PRESETS:
         if arg == name:
@@ -310,14 +318,16 @@ def parse_color(arg):
     return None
 
 
-def find_preset_index(r, g, b):
+def find_preset_index(r: int, g: int, b: int) -> tuple[int | None, str | None]:
+    """Find preset index and name matching RGB values."""
     for idx, (name, (pr, pg, pb)) in enumerate(COLOR_PRESETS):
         if (r, g, b) == (pr, pg, pb):
             return idx, name
     return None, None
 
 
-def send_rgb(dev_path, r, g, b, intensity=255, autonomous=False):
+def send_rgb(dev_path: str, r: int, g: int, b: int, intensity: int = 255, autonomous: bool = False) -> None:
+    """Send LampArray raw HID packet to set static color or autonomous mode."""
     fd = os.open(dev_path, os.O_RDWR | os.O_CLOEXEC)
     try:
         try:

@@ -18,29 +18,41 @@ export default class TufRgbPreferences extends ExtensionPreferences {
             icon_name: 'preferences-system-symbolic',
         });
 
-        // 1. Device Permissions Group
+        this._setupPermissionsGroup(page, window);
+        this._setupHardwareInfoGroup(page);
+
+        window.add(page);
+        this._refreshStatus();
+    }
+
+    _setupPermissionsGroup(page, window) {
         const permGroup = new Adw.PreferencesGroup({
             title: _('Device Permissions'),
             description: _('A udev rule is required so non-root users can control the ASUS TUF keyboard RGB lighting without administrator password prompts.'),
         });
 
-        const permRow = new Adw.ActionRow({
+        this._permRow = new Adw.ActionRow({
             title: _('Udev Access Rule'),
             subtitle: _('Checking permission status...'),
         });
 
-        const actionBtn = new Gtk.Button({
+        this._actionBtn = new Gtk.Button({
             valign: Gtk.Align.CENTER,
             label: _('Checking...'),
             sensitive: false,
         });
 
-        permRow.add_suffix(actionBtn);
-        permRow.set_activatable_widget(actionBtn);
-        permGroup.add(permRow);
-        page.add(permGroup);
+        this._actionBtn.connect('clicked', () => {
+            this._runPolkitAction(this._actionBtn._action, window);
+        });
 
-        // 2. Hardware Information Group
+        this._permRow.add_suffix(this._actionBtn);
+        this._permRow.set_activatable_widget(this._actionBtn);
+        permGroup.add(this._permRow);
+        page.add(permGroup);
+    }
+
+    _setupHardwareInfoGroup(page) {
         const infoGroup = new Adw.PreferencesGroup({
             title: _('Hardware Information'),
         });
@@ -51,167 +63,157 @@ export default class TufRgbPreferences extends ExtensionPreferences {
         });
         infoGroup.add(ctrlRow);
 
-        const devRow = new Adw.ActionRow({
+        this._devRow = new Adw.ActionRow({
             title: _('Device Node'),
             subtitle: _('Detecting...'),
         });
-        infoGroup.add(devRow);
+        infoGroup.add(this._devRow);
 
         const modelsRow = new Adw.ActionRow({
             title: _('Supported Models'),
-            subtitle: 'ASUS TUF Gaming A16 / F15 / A15 / Dash',
+            subtitle: 'ASUS TUF Gaming A16 / A18 / F15 / A15 / Dash',
         });
         infoGroup.add(modelsRow);
 
         page.add(infoGroup);
-        window.add(page);
+    }
 
-        // Status update logic
-        const refreshStatus = () => {
-            const bin = `${this.path}/bin/tuf-rgb`;
+    _refreshStatus() {
+        const bin = `${this.path}/bin/tuf-rgb`;
 
-            // Check permissions
-            try {
-                const proc = Gio.Subprocess.new(
-                    [bin, 'check'],
-                    Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE
-                );
-                proc.wait_async(null, (p, res) => {
-                    try {
-                        p.wait_finish(res);
-                        const code = p.get_exit_status();
-                        actionBtn.set_sensitive(true);
+        // Check permissions
+        try {
+            const proc = Gio.Subprocess.new(
+                [bin, 'check'],
+                Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE
+            );
+            proc.wait_async(null, (p, res) => {
+                try {
+                    p.wait_finish(res);
+                    const code = p.get_exit_status();
+                    this._actionBtn.set_sensitive(true);
 
-                        actionBtn.remove_css_class('suggested-action');
-                        actionBtn.remove_css_class('destructive-action');
+                    this._actionBtn.remove_css_class('suggested-action');
+                    this._actionBtn.remove_css_class('destructive-action');
 
-                        if (code === 0) {
-                            permRow.set_subtitle(_('Installed and active. Keyboard backlight is accessible.'));
-                            permRow.set_icon_name('emblem-ok-symbolic');
-                            actionBtn.set_label(_('Remove'));
-                            actionBtn.add_css_class('destructive-action');
-                            actionBtn._action = 'remove';
-                        } else if (code === 2) {
-                            permRow.set_subtitle(_('Not configured. Permission denied on device node.'));
-                            permRow.set_icon_name('dialog-warning-symbolic');
-                            actionBtn.set_label(_('Install'));
-                            actionBtn.add_css_class('suggested-action');
-                            actionBtn._action = 'install';
-                        } else {
-                            permRow.set_subtitle(_('Device not detected.'));
-                            permRow.set_icon_name('dialog-warning-symbolic');
-                            actionBtn.set_label(_('Retry'));
-                            actionBtn._action = 'check';
-                        }
-                    } catch (e) {
-                        permRow.set_subtitle(_('Failed to determine permission status.'));
-                        actionBtn.set_sensitive(true);
+                    if (code === 0) {
+                        this._permRow.set_subtitle(_('Installed and active. Keyboard backlight is accessible.'));
+                        this._permRow.set_icon_name('emblem-ok-symbolic');
+                        this._actionBtn.set_label(_('Remove'));
+                        this._actionBtn.add_css_class('destructive-action');
+                        this._actionBtn._action = 'remove';
+                    } else if (code === 2) {
+                        this._permRow.set_subtitle(_('Not configured. Permission denied on device node.'));
+                        this._permRow.set_icon_name('dialog-warning-symbolic');
+                        this._actionBtn.set_label(_('Install'));
+                        this._actionBtn.add_css_class('suggested-action');
+                        this._actionBtn._action = 'install';
+                    } else {
+                        this._permRow.set_subtitle(_('Device not detected.'));
+                        this._permRow.set_icon_name('dialog-warning-symbolic');
+                        this._actionBtn.set_label(_('Retry'));
+                        this._actionBtn._action = 'check';
                     }
-                });
-            } catch (e) {
-                permRow.set_subtitle(_('Helper binary unavailable.'));
-                actionBtn.set_sensitive(true);
-            }
+                } catch (e) {
+                    this._permRow.set_subtitle(_('Failed to determine permission status.'));
+                    this._actionBtn.set_sensitive(true);
+                }
+            });
+        } catch (e) {
+            this._permRow.set_subtitle(_('Helper binary unavailable.'));
+            this._actionBtn.set_sensitive(true);
+        }
 
-            // Detect device path
-            try {
-                const devProc = Gio.Subprocess.new(
-                    [bin, 'device'],
-                    Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE
-                );
-                devProc.communicate_utf8_async(null, null, (p, res) => {
-                    try {
-                        const [, stdout] = p.communicate_utf8_finish(res);
-                        const dev = stdout?.trim();
-                        if (dev) {
-                            devRow.set_subtitle(dev);
-                        } else {
-                            devRow.set_subtitle(_('Not detected'));
-                        }
-                    } catch (e) {
-                        devRow.set_subtitle(_('Unknown'));
+        // Detect device path
+        try {
+            const devProc = Gio.Subprocess.new(
+                [bin, 'device'],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE
+            );
+            devProc.communicate_utf8_async(null, null, (p, res) => {
+                try {
+                    const [, stdout] = p.communicate_utf8_finish(res);
+                    const dev = stdout?.trim();
+                    if (dev) {
+                        this._devRow.set_subtitle(dev);
+                    } else {
+                        this._devRow.set_subtitle(_('Not detected'));
                     }
-                });
-            } catch (e) {}
-        };
+                } catch (e) {
+                    this._devRow.set_subtitle(_('Unknown'));
+                }
+            });
+        } catch (e) {}
+    }
 
-        const runPolkitAction = action => {
-            if (action === 'check') {
-                refreshStatus();
-                return;
-            }
+    _runPolkitAction(action, window) {
+        if (action === 'check') {
+            this._refreshStatus();
+            return;
+        }
 
-            actionBtn.set_sensitive(false);
+        this._actionBtn.set_sensitive(false);
 
-            const installer = `${this.path}/bin/installer.sh`;
+        const installer = `${this.path}/bin/installer.sh`;
 
-            // Restore executable bit if needed
-            try {
-                GLib.chmod(installer, 0o755);
-            } catch (e) {}
+        try {
+            GLib.chmod(installer, 0o755);
+        } catch (e) {}
 
-            try {
-                const proc = Gio.Subprocess.new(
-                    ['pkexec', installer, action],
-                    Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE
-                );
-                proc.wait_async(null, (p, res) => {
-                    try {
-                        p.wait_finish(res);
-                        const success = p.get_successful();
-                        const toast = new Adw.Toast();
+        try {
+            const proc = Gio.Subprocess.new(
+                ['pkexec', installer, action],
+                Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE
+            );
+            proc.wait_async(null, (p, res) => {
+                try {
+                    p.wait_finish(res);
+                    const success = p.get_successful();
+                    const toast = new Adw.Toast();
 
-                        if (success) {
-                            actionBtn.remove_css_class('suggested-action');
-                            actionBtn.remove_css_class('destructive-action');
+                    if (success) {
+                        this._actionBtn.remove_css_class('suggested-action');
+                        this._actionBtn.remove_css_class('destructive-action');
 
-                            if (action === 'install') {
-                                toast.set_title(_('Permissions installed successfully.'));
-                                permRow.set_subtitle(_('Installed and active. Keyboard backlight is accessible.'));
-                                permRow.set_icon_name('emblem-ok-symbolic');
-                                actionBtn.set_label(_('Remove'));
-                                actionBtn.add_css_class('destructive-action');
-                                actionBtn._action = 'remove';
-                            } else {
-                                toast.set_title(_('Permissions rule removed.'));
-                                permRow.set_subtitle(_('Not configured. Permission denied on device node.'));
-                                permRow.set_icon_name('dialog-warning-symbolic');
-                                actionBtn.set_label(_('Install'));
-                                actionBtn.add_css_class('suggested-action');
-                                actionBtn._action = 'install';
-                            }
+                        if (action === 'install') {
+                            toast.set_title(_('Permissions installed successfully.'));
+                            this._permRow.set_subtitle(_('Installed and active. Keyboard backlight is accessible.'));
+                            this._permRow.set_icon_name('emblem-ok-symbolic');
+                            this._actionBtn.set_label(_('Remove'));
+                            this._actionBtn.add_css_class('destructive-action');
+                            this._actionBtn._action = 'remove';
                         } else {
-                            toast.set_title(_('Operation cancelled or failed.'));
+                            toast.set_title(_('Permissions rule removed.'));
+                            this._permRow.set_subtitle(_('Not configured. Permission denied on device node.'));
+                            this._permRow.set_icon_name('dialog-warning-symbolic');
+                            this._actionBtn.set_label(_('Install'));
+                            this._actionBtn.add_css_class('suggested-action');
+                            this._actionBtn._action = 'install';
                         }
+                    } else {
+                        toast.set_title(_('Operation cancelled or failed.'));
+                    }
 
-                        try {
-                            window.add_toast(toast);
-                        } catch (e) {}
-                    } catch (e) {
-                        try {
-                            const toast = new Adw.Toast({
-                                title: _('Execution error occurred.'),
-                            });
-                            window.add_toast(toast);
-                        } catch (err) {}
-                    } finally {
-                        actionBtn.set_sensitive(true);
-                        // Confirm state after background udev settles
-                        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 400, () => {
-                            refreshStatus();
-                            return GLib.SOURCE_REMOVE;
+                    try {
+                        window.add_toast(toast);
+                    } catch (e) {}
+                } catch (e) {
+                    try {
+                        const toast = new Adw.Toast({
+                            title: _('Execution error occurred.'),
                         });
-                    }
-                });
-            } catch (e) {
-                actionBtn.set_sensitive(true);
-            }
-        };
-
-        actionBtn.connect('clicked', () => {
-            runPolkitAction(actionBtn._action);
-        });
-
-        refreshStatus();
+                        window.add_toast(toast);
+                    } catch (err) {}
+                } finally {
+                    this._actionBtn.set_sensitive(true);
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 400, () => {
+                        this._refreshStatus();
+                        return GLib.SOURCE_REMOVE;
+                    });
+                }
+            });
+        } catch (e) {
+            this._actionBtn.set_sensitive(true);
+        }
     }
 }

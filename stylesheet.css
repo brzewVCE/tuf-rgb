@@ -28,6 +28,10 @@
     border-color: rgba(255, 255, 255, 0.5);
 }
 
+.tuf-rgb-swatch:focus {
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6);
+}
+
 .tuf-rgb-swatch-active {
     border: 2px solid #bde6fb !important;
     box-shadow: none !important;
@@ -69,6 +73,10 @@
 .tuf-rgb-pill:hover {
     background-color: rgba(255, 255, 255, 0.15);
     color: #ffffff;
+}
+
+.tuf-rgb-pill:focus {
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.3);
 }
 
 /* System accent styling (matches Zorin / GNOME Quick Settings active state) */
