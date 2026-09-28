@@ -1,3 +1,5 @@
+/* TUF-RGB Stylesheet - Native GNOME & Libadwaita Aesthetics */
+
 .tuf-rgb-palette-item {
     padding: 6px 0 10px 0;
     background-color: transparent !important;
@@ -5,6 +7,11 @@
 
 .tuf-rgb-swatch-box {
     spacing: 6px;
+    transition-duration: 200ms;
+}
+
+.tuf-rgb-palette-dimmed {
+    opacity: 0.35;
 }
 
 .tuf-rgb-swatch {
@@ -13,42 +20,87 @@
     min-width: 30px;
     min-height: 30px;
     border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-    transition-duration: 200ms;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    transition-duration: 150ms;
 }
 
 .tuf-rgb-swatch:hover {
-    border-color: rgba(255, 255, 255, 0.6);
-    box-shadow: 0 0 3px rgba(255, 255, 255, 0.3);
-    transform: scale(1.03);
+    border-color: rgba(255, 255, 255, 0.5);
 }
 
-.tuf-rgb-swatch:focus,
-.tuf-rgb-swatch:active {
-    border-color: #ffffff;
-    box-shadow: 0 0 3px rgba(255, 255, 255, 0.45);
-    transform: scale(0.97);
+.tuf-rgb-swatch-active {
+    border: 2px solid #bde6fb !important;
+    box-shadow: none !important;
 }
 
-.tuf-rgb-auto-swatch {
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
-    min-height: 32px;
-    border: none;
+.tuf-rgb-swatch-check {
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.tuf-rgb-swatch-check-dark {
+    color: #161c1f !important;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+/* Effect Segmented Buttons */
+.tuf-rgb-effects-item {
+    padding: 2px 0 8px 0;
     background-color: transparent !important;
-    background-size: contain;
 }
 
-.tuf-rgb-auto-swatch:hover {
-    box-shadow: 0 0 3px rgba(255, 255, 255, 0.35);
-    transform: scale(1.03);
+.tuf-rgb-effects-box {
+    spacing: 5px;
 }
 
-.tuf-rgb-auto-swatch:focus,
-.tuf-rgb-auto-swatch:active {
-    box-shadow: 0 0 3px rgba(255, 255, 255, 0.5);
-    transform: scale(0.97);
+.tuf-rgb-pill {
+    padding: 5px 13px;
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition-duration: 150ms;
 }
 
+.tuf-rgb-pill:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+}
+
+/* System accent styling (matches Zorin / GNOME Quick Settings active state) */
+.tuf-rgb-pill-active,
+.tuf-rgb-pill:checked,
+.tuf-rgb-pill.default {
+    background-color: #bde6fb !important;
+    border: 1px solid #bde6fb !important;
+    color: #161c1f !important;
+    font-weight: 700 !important;
+    box-shadow: none !important;
+}
+
+.tuf-rgb-pill-active:hover,
+.tuf-rgb-pill:checked:hover,
+.tuf-rgb-pill.default:hover {
+    background-color: #a9cee0 !important;
+    border-color: #a9cee0 !important;
+    color: #161c1f !important;
+}
+
+/* Speed Slider */
+.tuf-rgb-speed-item {
+    padding: 4px 12px 8px 12px;
+    background-color: transparent !important;
+    transition-duration: 200ms;
+}
+
+.tuf-rgb-speed-item-disabled {
+    opacity: 0.3;
+}
+
+.tuf-rgb-speed-box {
+    spacing: 0;
+}

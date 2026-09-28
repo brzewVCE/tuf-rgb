@@ -13,6 +13,9 @@ import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/ex
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as MessageTray from 'resource:///org/gnome/shell/ui/messageTray.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import * as Slider from 'resource:///org/gnome/shell/ui/slider.js';
+
+const SliderWidget = Slider.Slider || Slider.default || Slider;
 
 const PALETTE = [
     {name: 'Red', hex: '#ff0000', cmd: 'red'},
@@ -25,18 +28,25 @@ const PALETTE = [
     {name: 'White', hex: '#ffffff', cmd: 'white'},
 ];
 
+const EFFECTS = [
+    {id: 'static', label: 'Static'},
+    {id: 'breathe', label: 'Breathe'},
+    {id: 'heartbeat', label: 'Heartbeat'},
+    {id: 'cycle', label: 'Cycle'},
+];
+
 const RESTORE_RETRY_DELAYS_MS = [500, 1500, 3000];
 const INITIAL_WAKE_DELAY_MS = 500;
 
 /**
- * Custom PopupBaseMenuItem displaying a compact horizontal row of color swatches.
+ * Custom PopupBaseMenuItem displaying a row of 8 color swatches with active checkmark.
  */
 class ColorPaletteItem extends PopupMenu.PopupBaseMenuItem {
     static {
         GObject.registerClass(this);
     }
 
-    constructor(onColorSelected, extensionPath) {
+    constructor(onColorSelected) {
         super({
             reactive: false,
             can_focus: false,
@@ -44,6 +54,7 @@ class ColorPaletteItem extends PopupMenu.PopupBaseMenuItem {
         });
 
         this._onColorSelected = onColorSelected;
+        this._buttons = new Map();
 
         if (this._ornamentIcon) {
             this.remove_child(this._ornamentIcon);
@@ -51,7 +62,7 @@ class ColorPaletteItem extends PopupMenu.PopupBaseMenuItem {
             this._ornamentIcon = null;
         }
 
-        const box = new St.BoxLayout({
+        this._box = new St.BoxLayout({
             style_class: 'tuf-rgb-swatch-box',
             x_align: Clutter.ActorAlign.CENTER,
             x_expand: true,
@@ -65,21 +76,188 @@ class ColorPaletteItem extends PopupMenu.PopupBaseMenuItem {
                 accessible_name: c.name,
                 style: `background-color: ${c.hex};`,
             });
+
+            const isBright = (c.cmd === 'white' || c.cmd === 'yellow');
+            const checkLabel = new St.Label({
+                text: '✓',
+                style_class: isBright ? 'tuf-rgb-swatch-check tuf-rgb-swatch-check-dark' : 'tuf-rgb-swatch-check',
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+                visible: false,
+            });
+            btn.set_child(checkLabel);
+
             btn.connect('clicked', () => this._onColorSelected(c.cmd));
-            box.add_child(btn);
+            this._box.add_child(btn);
+            this._buttons.set(c.cmd, {btn, checkLabel});
         }
 
-        const autoBtn = new St.Button({
-            style_class: 'tuf-rgb-swatch tuf-rgb-auto-swatch',
-            can_focus: true,
-            track_hover: true,
-            accessible_name: _('ASUS Aura (Auto)'),
-            style: `background-image: url('${extensionPath}/icons/aura-auto.svg'); background-color: transparent;`,
+        this.add_child(this._box);
+    }
+
+    setActiveColor(colorCmd, isDimmed = false) {
+        if (isDimmed) {
+            this._box.add_style_class_name('tuf-rgb-palette-dimmed');
+            for (const {btn, checkLabel} of this._buttons.values()) {
+                btn.remove_style_class_name('tuf-rgb-swatch-active');
+                checkLabel.visible = false;
+            }
+            return;
+        }
+
+        this._box.remove_style_class_name('tuf-rgb-palette-dimmed');
+        for (const [cmd, {btn, checkLabel}] of this._buttons.entries()) {
+            const isActive = (cmd === colorCmd);
+            if (isActive) {
+                btn.add_style_class_name('tuf-rgb-swatch-active');
+                checkLabel.visible = true;
+            } else {
+                btn.remove_style_class_name('tuf-rgb-swatch-active');
+                checkLabel.visible = false;
+            }
+        }
+    }
+}
+
+/**
+ * Custom PopupBaseMenuItem displaying pill toggle buttons for effect presets.
+ */
+class EffectPillsItem extends PopupMenu.PopupBaseMenuItem {
+    static {
+        GObject.registerClass(this);
+    }
+
+    constructor(onEffectSelected) {
+        super({
+            reactive: false,
+            can_focus: false,
+            style_class: 'tuf-rgb-effects-item',
         });
-        autoBtn.connect('clicked', () => this._onColorSelected('auto'));
-        box.add_child(autoBtn);
+
+        this._onEffectSelected = onEffectSelected;
+        this._buttons = new Map();
+
+        if (this._ornamentIcon) {
+            this.remove_child(this._ornamentIcon);
+            this._ornamentIcon.destroy();
+            this._ornamentIcon = null;
+        }
+
+        const box = new St.BoxLayout({
+            style_class: 'tuf-rgb-effects-box',
+            x_align: Clutter.ActorAlign.CENTER,
+            x_expand: true,
+        });
+
+        for (const eff of EFFECTS) {
+            let labelText = eff.label;
+            try {
+                labelText = _(eff.label);
+            } catch (e) {}
+
+            const btn = new St.Button({
+                style_class: 'button tuf-rgb-pill',
+                can_focus: true,
+                track_hover: true,
+                toggle_mode: true,
+                label: labelText,
+            });
+            btn.connect('clicked', () => this._onEffectSelected(eff.id));
+            box.add_child(btn);
+            this._buttons.set(eff.id, btn);
+        }
 
         this.add_child(box);
+    }
+
+    setActiveEffect(activeId) {
+        for (const [id, btn] of this._buttons.entries()) {
+            const isActive = (id === activeId);
+            btn.checked = isActive;
+            if (isActive) {
+                btn.add_style_class_name('tuf-rgb-pill-active');
+                btn.add_style_class_name('default');
+            } else {
+                btn.remove_style_class_name('tuf-rgb-pill-active');
+                btn.remove_style_class_name('default');
+            }
+        }
+    }
+}
+
+/**
+ * Custom PopupBaseMenuItem displaying a speed slider with turtle and rabbit icons.
+ */
+class SpeedSliderItem extends PopupMenu.PopupBaseMenuItem {
+    static {
+        GObject.registerClass(this);
+    }
+
+    constructor(onSpeedChanged, extensionPath, initialSpeed = 0.5) {
+        super({
+            reactive: true,
+            can_focus: false,
+            style_class: 'tuf-rgb-speed-item',
+        });
+
+        this._onSpeedChanged = onSpeedChanged;
+        this._path = extensionPath;
+        this._debounceId = null;
+
+        if (this._ornamentIcon) {
+            this.remove_child(this._ornamentIcon);
+            this._ornamentIcon.destroy();
+            this._ornamentIcon = null;
+        }
+
+        const box = new St.BoxLayout({
+            style_class: 'tuf-rgb-speed-box',
+            x_align: Clutter.ActorAlign.FILL,
+            x_expand: true,
+        });
+
+        this._slider = new SliderWidget(initialSpeed);
+        this._slider.x_expand = true;
+        this._slider.y_align = Clutter.ActorAlign.CENTER;
+        this._slider.connect('notify::value', () => {
+            if (this._debounceId) {
+                GLib.source_remove(this._debounceId);
+                this._debounceId = null;
+            }
+            this._debounceId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 80, () => {
+                this._debounceId = null;
+                this._onSpeedChanged(this._slider.value);
+                return GLib.SOURCE_REMOVE;
+            });
+        });
+        box.add_child(this._slider);
+
+        this.add_child(box);
+    }
+
+    setSpeed(speedVal) {
+        if (this._slider)
+            this._slider.value = Math.max(0.05, Math.min(1.0, speedVal));
+    }
+
+    setEnabled(enabled) {
+        if (enabled) {
+            this.remove_style_class_name('tuf-rgb-speed-item-disabled');
+            if (this._slider)
+                this._slider.reactive = true;
+        } else {
+            this.add_style_class_name('tuf-rgb-speed-item-disabled');
+            if (this._slider)
+                this._slider.reactive = false;
+        }
+    }
+
+    destroy() {
+        if (this._debounceId) {
+            GLib.source_remove(this._debounceId);
+            this._debounceId = null;
+        }
+        super.destroy();
     }
 }
 
@@ -93,21 +271,101 @@ class KeyboardColorSection extends PopupMenu.PopupMenuSection {
         this._path = extension.path;
         this._notifCooldown = false;
         this._notifTimeoutId = null;
+        this._currentColor = 'red';
+        this._currentEffect = 'static';
 
         this.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(_('Color')));
-        this.addMenuItem(new ColorPaletteItem(cmd => this._runCmd(cmd), this._path));
+        this._paletteItem = new ColorPaletteItem(cmd => this._onColorSelected(cmd));
+        this.addMenuItem(this._paletteItem);
+
+        this.addMenuItem(new PopupMenu.PopupSeparatorMenuItem(_('Effect')));
+        this._effectsItem = new EffectPillsItem(effectId => this._onEffectSelected(effectId));
+        this.addMenuItem(this._effectsItem);
+
+        this._speedItem = new SpeedSliderItem(speed => this._onSpeedChanged(speed), this._path);
+        this.addMenuItem(this._speedItem);
 
         this.addAction(_('RGB Settings'), () => {
             Main.panel.closeQuickSettings();
             this._openPreferences();
         });
+
+        this.syncState();
     }
 
-    _runCmd(cmd) {
+    syncState() {
+        const stateFile = `${GLib.get_home_dir()}/.config/tuf-rgb/state.json`;
+        try {
+            const [ok, contents] = GLib.file_get_contents(stateFile);
+            if (ok) {
+                const state = JSON.parse(new TextDecoder().decode(contents));
+                this._currentColor = state.color_name || 'red';
+                this._currentEffect = state.effect || 'static';
+                const speed = state.speed !== undefined ? state.speed : 0.5;
+
+                this._speedItem.setSpeed(speed);
+                this._effectsItem.setActiveEffect(this._currentEffect);
+
+                if (this._currentEffect === 'cycle') {
+                    this._paletteItem.setActiveColor(null, true);
+                    this._speedItem.setEnabled(true);
+                } else if (this._currentEffect === 'static') {
+                    this._paletteItem.setActiveColor(this._currentColor, false);
+                    this._speedItem.setEnabled(false);
+                } else {
+                    this._paletteItem.setActiveColor(this._currentColor, false);
+                    this._speedItem.setEnabled(true);
+                }
+            }
+        } catch (e) {
+            // Ignore parse errors on missing/empty state
+        }
+    }
+
+    _onColorSelected(cmd) {
+        // Approach 1: If cycle is active, selecting a color exits cycle to static mode
+        if (this._currentEffect === 'cycle') {
+            this._currentEffect = 'static';
+            this._effectsItem.setActiveEffect('static');
+            this._speedItem.setEnabled(false);
+        }
+
+        this._currentColor = cmd;
+        this._paletteItem.setActiveColor(cmd, false);
+        this._runCmd(cmd);
+    }
+
+    _onEffectSelected(effectId) {
+        this._currentEffect = effectId;
+
+        if (effectId === 'cycle') {
+            this._paletteItem.setActiveColor(null, true);
+            this._effectsItem.setActiveEffect('cycle');
+            this._speedItem.setEnabled(true);
+            this._runCmd(['effect', 'cycle']);
+        } else if (effectId === 'static') {
+            this._paletteItem.setActiveColor(this._currentColor, false);
+            this._effectsItem.setActiveEffect('static');
+            this._speedItem.setEnabled(false);
+            this._runCmd(['effect', 'static']);
+        } else {
+            this._paletteItem.setActiveColor(this._currentColor, false);
+            this._effectsItem.setActiveEffect(effectId);
+            this._speedItem.setEnabled(true);
+            this._runCmd(['effect', effectId]);
+        }
+    }
+
+    _onSpeedChanged(speedVal) {
+        this._runCmd(['speed', speedVal.toFixed(2)]);
+    }
+
+    _runCmd(args) {
         const bin = `${this._path}/bin/tuf-rgb`;
+        const argv = Array.isArray(args) ? [bin, ...args] : [bin, args];
         try {
             const proc = Gio.Subprocess.new(
-                [bin, cmd],
+                argv,
                 Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE
             );
             proc.wait_async(null, (p, res) => {
@@ -224,6 +482,7 @@ class KeyboardColorManager {
         this._retryCount = 0;
         this._toggle = null;
         this._section = null;
+        this._menuSignalId = null;
         this._injectTimeoutId = null;
         this._sleepTimeoutId = null;
         this._restoreTimeoutId = null;
@@ -251,6 +510,7 @@ class KeyboardColorManager {
                     p.wait_finish(res);
                     const exitCode = p.get_exit_status();
                     if (exitCode === 0) {
+                        this._section?.syncState();
                         return;
                     }
                     console.warn(`[tuf-rgb] Restore attempt ${attempt + 1} exited with status ${exitCode}`);
@@ -370,6 +630,13 @@ class KeyboardColorManager {
         this._toggle = toggle;
         this._section = new KeyboardColorSection(this._extension);
         this._toggle.menu.addMenuItem(this._section);
+
+        if (this._toggle.menu.connect) {
+            this._menuSignalId = this._toggle.menu.connect('open-state-changed', (menu, isOpen) => {
+                if (isOpen && this._section)
+                    this._section.syncState();
+            });
+        }
     }
 
     destroy() {
@@ -391,6 +658,11 @@ class KeyboardColorManager {
         if (this._sleepSignalId) {
             Gio.DBus.system.signal_unsubscribe(this._sleepSignalId);
             this._sleepSignalId = null;
+        }
+
+        if (this._menuSignalId && this._toggle?.menu) {
+            this._toggle.menu.disconnect(this._menuSignalId);
+            this._menuSignalId = null;
         }
 
         if (this._section) {

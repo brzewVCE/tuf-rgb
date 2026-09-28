@@ -7,10 +7,13 @@ TUF-RGB Backend Helper: Communicates with ITE5570 LampArray controller.
 Packaged for GNOME Shell Extension tuf-rgb.
 """
 
+import colorsys
 import fcntl
 import glob
 import json
+import math
 import os
+import signal
 import sys
 import time
 from pathlib import Path
@@ -28,6 +31,7 @@ COLOR_PRESETS = [
 
 CONFIG_DIR = Path.home() / ".config" / "tuf-rgb"
 STATE_FILE = CONFIG_DIR / "state.json"
+PID_FILE = CONFIG_DIR / "effect.pid"
 
 HIDIOCSFEATURE_BASE = 0xC0004806
 
@@ -64,10 +68,13 @@ def check_permission(dev_path):
 def load_state():
     defaults = {
         "index": 0,
+        "color_name": "red",
         "r": 255,
         "g": 0,
         "b": 0,
         "intensity": 255,
+        "effect": "static",
+        "speed": 0.5,
         "on": True,
         "auto": False,
     }
@@ -92,25 +99,222 @@ def save_state(state):
         pass
 
 
+def is_daemon_running():
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+            os.kill(pid, 0)
+            return pid
+        except (ValueError, OSError, ProcessLookupError):
+            try:
+                PID_FILE.unlink(missing_ok=True)
+            except Exception:
+                pass
+    return None
+
+
+def stop_effect_daemon():
+    pid = is_daemon_running()
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            for _ in range(10):
+                time.sleep(0.04)
+                os.kill(pid, 0)
+        except OSError:
+            pass
+        try:
+            PID_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _effect_loop(dev_path):
+    try:
+        PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    except Exception:
+        pass
+
+    running = True
+
+    def _sig_handler(signum, frame):
+        nonlocal running
+        running = False
+
+    signal.signal(signal.SIGTERM, _sig_handler)
+    signal.signal(signal.SIGINT, _sig_handler)
+
+    fd = None
+    try:
+        fd = os.open(dev_path, os.O_RDWR | os.O_CLOEXEC)
+    except Exception:
+        sys.exit(1)
+
+    try:
+        arm_pkt = bytes([0x5F, 0x01] + [0x00] * 49)
+        fcntl.ioctl(fd, hidiocsfeature(len(arm_pkt)), arm_pkt)
+    except Exception:
+        pass
+
+    try:
+        ctrl_pkt = bytes([0x46, 0x00])
+        fcntl.ioctl(fd, hidiocsfeature(len(ctrl_pkt)), ctrl_pkt)
+    except Exception:
+        pass
+
+    state = load_state()
+    last_check = 0.0
+    last_mtime = 0.0
+
+    try:
+        while running:
+            now = time.time()
+            if now - last_check > 0.2:
+                last_check = now
+                if STATE_FILE.exists():
+                    try:
+                        mtime = STATE_FILE.stat().st_mtime
+                        if mtime != last_mtime:
+                            last_mtime = mtime
+                            state = load_state()
+                    except Exception:
+                        pass
+
+            if not state.get("on", True):
+                break
+
+            effect = state.get("effect", "static")
+            if effect == "static":
+                break
+
+            speed = max(0.05, min(1.0, float(state.get("speed", 0.5))))
+            max_intensity = state.get("intensity", 255)
+            min_intensity = max(5, int(max_intensity * 0.06))
+
+            r = state.get("r", 255)
+            g = state.get("g", 0)
+            b = state.get("b", 0)
+            cur_intensity = max_intensity
+
+            if effect == "cycle":
+                rate = 0.04 + speed * 0.25
+                hue = (now * rate) % 1.0
+                hr, hg, hb = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
+                r, g, b = int(hr * 255), int(hg * 255), int(hb * 255)
+                cur_intensity = max_intensity
+
+            elif effect == "breathe":
+                freq = 0.2 + speed * 0.9
+                factor = (math.sin(now * 2 * math.pi * freq - math.pi / 2) + 1.0) / 2.0
+                cur_intensity = int(min_intensity + factor * (max_intensity - min_intensity))
+
+            elif effect == "heartbeat":
+                period = 2.4 - speed * 1.5
+                phase = (now % period) / period
+                if phase < 0.15:
+                    sub = phase / 0.15
+                    factor = math.sin(sub * math.pi)
+                elif phase < 0.23:
+                    factor = 0.0
+                elif phase < 0.38:
+                    sub = (phase - 0.23) / 0.15
+                    factor = 0.75 * math.sin(sub * math.pi)
+                else:
+                    factor = 0.0
+                cur_intensity = int(min_intensity + factor * (max_intensity - min_intensity))
+
+            try:
+                pkt = bytes([
+                    0x45, 0x01, 0x00, 0x00, 0x00, 0x00,
+                    max(0, min(255, r)),
+                    max(0, min(255, g)),
+                    max(0, min(255, b)),
+                    max(0, min(255, cur_intensity)),
+                ])
+                fcntl.ioctl(fd, hidiocsfeature(len(pkt)), pkt)
+            except BrokenPipeError:
+                try:
+                    os.close(fd)
+                except Exception:
+                    pass
+                new_dev = find_hidraw()
+                if new_dev:
+                    try:
+                        fd = os.open(new_dev, os.O_RDWR | os.O_CLOEXEC)
+                    except Exception:
+                        break
+                else:
+                    break
+            except Exception:
+                pass
+
+            time.sleep(0.025)
+
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+        try:
+            if PID_FILE.exists():
+                pid_str = PID_FILE.read_text(encoding="utf-8").strip()
+                if pid_str == str(os.getpid()):
+                    PID_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def spawn_effect_daemon(dev_path):
+    stop_effect_daemon()
+    try:
+        pid = os.fork()
+        if pid > 0:
+            return
+    except OSError:
+        return
+
+    os.setsid()
+    try:
+        pid = os.fork()
+        if pid > 0:
+            sys.exit(0)
+    except OSError:
+        sys.exit(1)
+
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        with open("/dev/null", "r") as null_in, open("/dev/null", "a+") as null_out:
+            os.dup2(null_in.fileno(), sys.stdin.fileno())
+            os.dup2(null_out.fileno(), sys.stdout.fileno())
+            os.dup2(null_out.fileno(), sys.stderr.fileno())
+    except Exception:
+        pass
+
+    _effect_loop(dev_path)
+    sys.exit(0)
+
+
 def parse_color(arg):
     arg = arg.strip().lower()
     for name, (r, g, b) in COLOR_PRESETS:
         if arg == name:
-            return r, g, b
+            return r, g, b, name
     clean = arg.replace("#", "")
     if len(clean) == 6:
         try:
-            return int(clean[0:2], 16), int(clean[2:4], 16), int(clean[4:6], 16)
+            return int(clean[0:2], 16), int(clean[2:4], 16), int(clean[4:6], 16), f"#{clean}"
         except ValueError:
             pass
     return None
 
 
 def find_preset_index(r, g, b):
-    for idx, (_, (pr, pg, pb)) in enumerate(COLOR_PRESETS):
+    for idx, (name, (pr, pg, pb)) in enumerate(COLOR_PRESETS):
         if (r, g, b) == (pr, pg, pb):
-            return idx
-    return None
+            return idx, name
+    return None, None
 
 
 def send_rgb(dev_path, r, g, b, intensity=255, autonomous=False):
@@ -168,6 +372,11 @@ def main():
         else:
             sys.exit(3)
 
+    if cmd == "state":
+        state = load_state()
+        print(json.dumps(state, indent=2))
+        sys.exit(0)
+
     # Optional retry support for standalone invocations
     retries = 1
     retry_delay = 0.5
@@ -207,10 +416,15 @@ def main():
     try:
         if cmd == "restore":
             if not state.get("on", True):
+                stop_effect_daemon()
                 send_rgb(dev, 0, 0, 0, 0)
             elif state.get("auto", False):
+                stop_effect_daemon()
                 send_rgb(dev, 0, 0, 0, 0, autonomous=True)
+            elif state.get("effect", "static") != "static":
+                spawn_effect_daemon(dev)
             else:
+                stop_effect_daemon()
                 r = state.get("r", 255)
                 g = state.get("g", 0)
                 b = state.get("b", 0)
@@ -218,51 +432,124 @@ def main():
                 send_rgb(dev, r, g, b, intensity)
             sys.exit(0)
 
-        elif cmd == "next":
-            idx = (state.get("index", -1) + 1) % len(COLOR_PRESETS)
-            name, (r, g, b) = COLOR_PRESETS[idx]
-            intensity = state.get("intensity", 255)
-            send_rgb(dev, r, g, b, intensity)
-            state["index"] = idx
-            state["r"], state["g"], state["b"] = r, g, b
+        elif cmd == "effect":
+            if len(args) < 2:
+                print(state.get("effect", "static"))
+                sys.exit(0)
+
+            eff_name = args[1].lower()
+            if eff_name not in ("static", "breathe", "heartbeat", "cycle"):
+                sys.exit(1)
+
+            if "--speed" in args:
+                try:
+                    s_idx = args.index("--speed")
+                    state["speed"] = max(0.05, min(1.0, float(args[s_idx + 1])))
+                except (ValueError, IndexError):
+                    pass
+
+            state["effect"] = eff_name
             state["on"] = True
             state["auto"] = False
             save_state(state)
+
+            if eff_name == "static":
+                stop_effect_daemon()
+                r = state.get("r", 255)
+                g = state.get("g", 0)
+                b = state.get("b", 0)
+                intensity = state.get("intensity", 255)
+                send_rgb(dev, r, g, b, intensity)
+            else:
+                spawn_effect_daemon(dev)
+
+            sys.exit(0)
+
+        elif cmd == "speed":
+            if len(args) > 1:
+                try:
+                    val = float(args[1])
+                    state["speed"] = max(0.05, min(1.0, val))
+                    save_state(state)
+                except ValueError:
+                    sys.exit(1)
+            sys.exit(0)
+
+        elif cmd == "stop-effect":
+            stop_effect_daemon()
+            state["effect"] = "static"
+            save_state(state)
+            r = state.get("r", 255)
+            g = state.get("g", 0)
+            b = state.get("b", 0)
+            intensity = state.get("intensity", 255)
+            send_rgb(dev, r, g, b, intensity)
+            sys.exit(0)
+
+        elif cmd == "next":
+            idx = (state.get("index", -1) + 1) % len(COLOR_PRESETS)
+            name, (r, g, b) = COLOR_PRESETS[idx]
+            state["index"] = idx
+            state["color_name"] = name
+            state["r"], state["g"], state["b"] = r, g, b
+            state["on"] = True
+            state["auto"] = False
+            if state.get("effect") == "cycle":
+                state["effect"] = "static"
+                stop_effect_daemon()
+            save_state(state)
+
+            if state.get("effect", "static") == "static":
+                intensity = state.get("intensity", 255)
+                send_rgb(dev, r, g, b, intensity)
 
         elif cmd == "prev":
             idx = (state.get("index", 1) - 1) % len(COLOR_PRESETS)
             name, (r, g, b) = COLOR_PRESETS[idx]
-            intensity = state.get("intensity", 255)
-            send_rgb(dev, r, g, b, intensity)
             state["index"] = idx
+            state["color_name"] = name
             state["r"], state["g"], state["b"] = r, g, b
             state["on"] = True
             state["auto"] = False
+            if state.get("effect") == "cycle":
+                state["effect"] = "static"
+                stop_effect_daemon()
             save_state(state)
+
+            if state.get("effect", "static") == "static":
+                intensity = state.get("intensity", 255)
+                send_rgb(dev, r, g, b, intensity)
 
         elif cmd == "toggle":
             if state.get("on", True):
+                stop_effect_daemon()
                 send_rgb(dev, 0, 0, 0, 0)
                 state["on"] = False
             else:
+                state["on"] = True
                 if state.get("auto", False):
+                    stop_effect_daemon()
                     send_rgb(dev, 0, 0, 0, 0, autonomous=True)
+                elif state.get("effect", "static") != "static":
+                    spawn_effect_daemon(dev)
                 else:
                     r = state.get("r", 255)
                     g = state.get("g", 0)
                     b = state.get("b", 0)
                     intensity = state.get("intensity", 255)
                     send_rgb(dev, r, g, b, intensity)
-                state["on"] = True
             save_state(state)
 
         elif cmd == "auto":
+            stop_effect_daemon()
             send_rgb(dev, 0, 0, 0, 0, autonomous=True)
             state["auto"] = True
             state["on"] = True
+            state["effect"] = "static"
             save_state(state)
 
         elif cmd == "off":
+            stop_effect_daemon()
             send_rgb(dev, 0, 0, 0, 0)
             state["on"] = False
             save_state(state)
@@ -271,31 +558,49 @@ def main():
             val = int(args[1])
             intensity = max(0, min(255, int(val * 255 / 100)))
             if intensity == 0:
+                stop_effect_daemon()
                 send_rgb(dev, 0, 0, 0, 0)
                 state["on"] = False
                 state["intensity"] = 0
             else:
-                r = state.get("r", 255)
-                g = state.get("g", 0)
-                b = state.get("b", 0)
-                send_rgb(dev, r, g, b, intensity)
                 state["intensity"] = intensity
                 state["on"] = True
                 state["auto"] = False
+                if state.get("effect", "static") == "static":
+                    r = state.get("r", 255)
+                    g = state.get("g", 0)
+                    b = state.get("b", 0)
+                    send_rgb(dev, r, g, b, intensity)
             save_state(state)
 
         else:
-            color = parse_color(cmd)
-            if color:
-                r, g, b = color
-                intensity = state.get("intensity", 255)
-                send_rgb(dev, r, g, b, intensity)
+            color_res = parse_color(cmd)
+            if color_res:
+                r, g, b, col_name = color_res
                 state["r"], state["g"], state["b"] = r, g, b
+                state["color_name"] = col_name
                 state["on"] = True
                 state["auto"] = False
-                preset_idx = find_preset_index(r, g, b)
+
+                preset_idx, _ = find_preset_index(r, g, b)
                 if preset_idx is not None:
                     state["index"] = preset_idx
+
+                # If in cycle mode, picking a color exits cycle mode into static
+                if state.get("effect") == "cycle":
+                    state["effect"] = "static"
+                    stop_effect_daemon()
+                    intensity = state.get("intensity", 255)
+                    send_rgb(dev, r, g, b, intensity)
+                elif state.get("effect", "static") == "static":
+                    stop_effect_daemon()
+                    intensity = state.get("intensity", 255)
+                    send_rgb(dev, r, g, b, intensity)
+                else:
+                    # breathe or heartbeat continues with new color
+                    if not is_daemon_running():
+                        spawn_effect_daemon(dev)
+
                 save_state(state)
             else:
                 sys.exit(1)

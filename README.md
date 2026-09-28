@@ -11,13 +11,15 @@ Designed specifically for 2024+ ASUS laptops equipped with the **ITE5570 HID Lam
 
 ## Features
 
-- **Native Quick Settings Integration:** Adds an elegant, compact color palette directly under the existing "Keyboard" brightness menu.
-- **Modern GNOME & Libadwaita Design:** Follows GNOME Human Interface Guidelines with rounded swatches, smooth 3px hover glow, and a dedicated Libadwaita Preferences dialog.
-- **One-Click Color Switching:** 8 vibrant static presets (Red, Orange, Yellow, Green, Cyan, Blue, Purple, White) plus an integrated graphical **Aura (Auto)** tile to return to firmware autonomous animation.
-- **State Persistence:** Automatically saves your color selection and restores it across logins, reboots, and sleep/wake suspend cycles (`PrepareForSleep` DBus integration).
+- **Native Quick Settings Integration:** Adds an elegant, compact color palette and animation controls directly under the existing "Keyboard" brightness menu.
+- **Modern GNOME & Libadwaita Design:** Follows GNOME Human Interface Guidelines and system accent colors (`.quick-toggle:checked`, `.button.default`) with rounded swatches, active checkmark indicator, dynamic effect presets, and a dedicated Libadwaita Preferences dialog.
+- **8 Pure Color Swatches:** One-click instant switching between 8 vibrant presets (Red, Orange, Yellow, Green, Cyan, Blue, Purple, White) with clean visual active indicator and smart high-contrast checkmark.
+- **Dynamic Effect Presets:** Choose between **Static**, **Breathe** (smooth sine wave), **Heartbeat** (double-pulse EKG rhythm), and **Cycle** (smooth rainbow color transition).
+- **Speed Slider:** Intuitive native speed control slider active for all dynamic animation modes, visually matching system sliders.
+- **State Persistence:** Automatically saves your color, effect mode, and animation speed, seamlessly restoring them across logins, reboots, and sleep/wake suspend cycles (`PrepareForSleep` DBus integration).
 - **Non-Intrusive Permission Handling:** Instead of intrusive Polkit popups on every color change, unprivileged attempts generate a standard GNOME notification with a `[Settings]` button to grant persistent access once.
 - **Libadwaita Preferences Window:** Configure and manage `/etc/udev/rules.d/99-tuf-rgb.rules` with a single click, view detected device paths (e.g. `/dev/hidraw2`), and inspect permission health.
-- **Zero-Daemon Overhead:** Operates with 0 MB background RAM overhead. Hardware commands execute asynchronously via `Gio.Subprocess` without blocking the GNOME Shell UI.
+- **Ultra-Lightweight Background Engine:** Operates with < 0.2% CPU overhead during animations and 0% CPU in static mode.
 
 ---
 
@@ -64,12 +66,15 @@ The extension includes a standalone command-line helper at `bin/tuf-rgb`. You ca
    - **Command:** `python3 ~/.local/share/gnome-shell/extensions/tuf-rgb@brzewvce.github.com/bin/tuf-rgb next`
    - **Shortcut:** Your preferred key combination.
 
-Other available subcommands:
-- `bin/tuf-rgb prev` - Switch to previous color preset
-- `bin/tuf-rgb auto` - Switch to ASUS Aura autonomous hardware mode
+Available CLI subcommands:
+- `bin/tuf-rgb effect <static|breathe|heartbeat|cycle> [--speed <0.1-1.0>]` - Switch animation effect
+- `bin/tuf-rgb speed <0.1-1.0>` - Change animation speed in real time
+- `bin/tuf-rgb stop-effect` - Stop running animation daemon
+- `bin/tuf-rgb state` - Print current hardware color, effect, and daemon state
+- `bin/tuf-rgb prev` / `bin/tuf-rgb next` - Cycle through color presets
 - `bin/tuf-rgb toggle` - Turn backlight on/off
-- `bin/tuf-rgb restore` - Reapply saved color from state configuration
-- `bin/tuf-rgb #ff0077` - Set custom hex color
+- `bin/tuf-rgb restore` - Reapply saved color, effect mode, and speed
+- `bin/tuf-rgb #00d5ff` - Set custom hex color
 
 ---
 
