@@ -1,6 +1,6 @@
 # TUF Keyboard RGB for GNOME
 
-[![GNOME 45 | 46 | 47](https://img.shields.io/badge/GNOME-45%20%7C%2046%20%7C%2047-blue.svg)](https://extensions.gnome.org/)
+[![GNOME 45 | 46 | 47 | 48](https://img.shields.io/badge/GNOME-45%20%7C%2046%20%7C%2047%20%7C%2048-blue.svg)](https://extensions.gnome.org/)
 [![License: GPL-2.0](https://img.shields.io/badge/License-GPLv2-green.svg)](LICENSE)
 
 A lightweight GNOME Shell extension that seamlessly integrates RGB keyboard backlight color controls into the native GNOME Quick Settings menu on ASUS TUF Gaming laptops.
@@ -52,7 +52,7 @@ Install directly from [extensions.gnome.org](https://extensions.gnome.org/extens
    gnome-extensions enable tuf-rgb@brzewvce.github.com
    ```
 
-4. Open the Quick Settings menu, expand the **Keyboard** toggle, and click **RGB Settings** (or click any color swatch and use the `[Settings]` notification button). In the Preferences window, click **Install** to grant persistent hardware access via `udev`.
+4. Open the Quick Settings menu, expand the **Keyboard** toggle, and click **RGB Settings** (or click any color swatch and use the `[Settings]` notification button). In the Preferences window, click **Install (Copy)** to copy the one-line `udev` rule command, paste it into your terminal, and click **Refresh**.
 
 ---
 
