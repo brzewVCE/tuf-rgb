@@ -4,6 +4,7 @@
 // -*- mode: js2; indent-tabs-mode: nil; js2-basic-offset: 4 -*-
 
 import Adw from 'gi://Adw';
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk';
@@ -11,6 +12,7 @@ import {ExtensionPreferences, gettext as _} from 'resource:///org/gnome/Shell/Ex
 
 export default class TufRgbPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
+        this.initTranslations();
         window.set_default_size(580, 500);
 
         const page = new Adw.PreferencesPage({
@@ -43,10 +45,18 @@ export default class TufRgbPreferences extends ExtensionPreferences {
         });
 
         this._actionBtn.connect('clicked', () => {
-            this._runPolkitAction(this._actionBtn._action, window);
+            this._handlePermissionAction(this._actionBtn._action, window);
         });
 
+        this._refreshBtn = new Gtk.Button({
+            valign: Gtk.Align.CENTER,
+            icon_name: 'view-refresh-symbolic',
+            tooltip_text: _('Refresh permission status'),
+        });
+        this._refreshBtn.connect('clicked', () => this._refreshStatus());
+
         this._permRow.add_suffix(this._actionBtn);
+        this._permRow.add_suffix(this._refreshBtn);
         this._permRow.set_activatable_widget(this._actionBtn);
         permGroup.add(this._permRow);
         page.add(permGroup);
@@ -99,13 +109,13 @@ export default class TufRgbPreferences extends ExtensionPreferences {
                     if (code === 0) {
                         this._permRow.set_subtitle(_('Installed and active. Keyboard backlight is accessible.'));
                         this._permRow.set_icon_name('emblem-ok-symbolic');
-                        this._actionBtn.set_label(_('Remove'));
+                        this._actionBtn.set_label(_('Remove (Copy)'));
                         this._actionBtn.add_css_class('destructive-action');
                         this._actionBtn._action = 'remove';
                     } else if (code === 2) {
                         this._permRow.set_subtitle(_('Not configured. Permission denied on device node.'));
                         this._permRow.set_icon_name('dialog-warning-symbolic');
-                        this._actionBtn.set_label(_('Install'));
+                        this._actionBtn.set_label(_('Install (Copy)'));
                         this._actionBtn.add_css_class('suggested-action');
                         this._actionBtn._action = 'install';
                     } else {
@@ -146,74 +156,38 @@ export default class TufRgbPreferences extends ExtensionPreferences {
         } catch (e) {}
     }
 
-    _runPolkitAction(action, window) {
+    _handlePermissionAction(action, window) {
         if (action === 'check') {
             this._refreshStatus();
             return;
         }
 
-        this._actionBtn.set_sensitive(false);
+        let cmd = '';
+        let message = '';
 
-        const installer = `${this.path}/bin/installer.sh`;
+        if (action === 'install') {
+            cmd = 'sudo sh -c \'echo "SUBSYSTEM==\\"hidraw\\", KERNELS==\\"i2c-ITE5570*\\", TAG+=\\"uaccess\\", MODE=\\"0666\\"" > /etc/udev/rules.d/99-tuf-rgb.rules && udevadm control --reload && udevadm trigger\'';
+            message = _('Install command copied to clipboard. Run it in terminal, then click Refresh.');
+        } else if (action === 'remove') {
+            cmd = 'sudo rm -f /etc/udev/rules.d/99-tuf-rgb.rules && sudo udevadm control --reload && sudo udevadm trigger';
+            message = _('Remove command copied to clipboard. Run it in terminal, then click Refresh.');
+        }
 
-        try {
-            GLib.chmod(installer, 0o755);
-        } catch (e) {}
+        if (cmd) {
+            try {
+                const clipboard = Gdk.Display.get_default()?.get_clipboard();
+                clipboard?.set(cmd);
+            } catch (e) {
+                console.error(`[tuf-rgb] Failed to copy command to clipboard: ${e.message}`);
+            }
 
-        try {
-            const proc = Gio.Subprocess.new(
-                ['pkexec', installer, action],
-                Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE
-            );
-            proc.wait_async(null, (p, res) => {
-                try {
-                    p.wait_finish(res);
-                    const success = p.get_successful();
-                    const toast = new Adw.Toast();
-
-                    if (success) {
-                        this._actionBtn.remove_css_class('suggested-action');
-                        this._actionBtn.remove_css_class('destructive-action');
-
-                        if (action === 'install') {
-                            toast.set_title(_('Permissions installed successfully.'));
-                            this._permRow.set_subtitle(_('Installed and active. Keyboard backlight is accessible.'));
-                            this._permRow.set_icon_name('emblem-ok-symbolic');
-                            this._actionBtn.set_label(_('Remove'));
-                            this._actionBtn.add_css_class('destructive-action');
-                            this._actionBtn._action = 'remove';
-                        } else {
-                            toast.set_title(_('Permissions rule removed.'));
-                            this._permRow.set_subtitle(_('Not configured. Permission denied on device node.'));
-                            this._permRow.set_icon_name('dialog-warning-symbolic');
-                            this._actionBtn.set_label(_('Install'));
-                            this._actionBtn.add_css_class('suggested-action');
-                            this._actionBtn._action = 'install';
-                        }
-                    } else {
-                        toast.set_title(_('Operation cancelled or failed.'));
-                    }
-
-                    try {
-                        window.add_toast(toast);
-                    } catch (e) {}
-                } catch (e) {
-                    try {
-                        const toast = new Adw.Toast({
-                            title: _('Execution error occurred.'),
-                        });
-                        window.add_toast(toast);
-                    } catch (err) {}
-                } finally {
-                    this._actionBtn.set_sensitive(true);
-                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 400, () => {
-                        this._refreshStatus();
-                        return GLib.SOURCE_REMOVE;
-                    });
-                }
-            });
-        } catch (e) {
-            this._actionBtn.set_sensitive(true);
+            try {
+                const toast = new Adw.Toast({
+                    title: message,
+                    timeout: 5,
+                });
+                window.add_toast(toast);
+            } catch (e) {}
         }
     }
 }

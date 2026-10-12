@@ -33,8 +33,8 @@
 }
 
 .tuf-rgb-swatch-active {
-    border: 2px solid #bde6fb !important;
-    box-shadow: none !important;
+    border: 2px solid #ffffff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
 
 .tuf-rgb-swatch-check {
@@ -79,23 +79,21 @@
     box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.3);
 }
 
-/* System accent styling (matches Zorin / GNOME Quick Settings active state) */
+/* Native GNOME Shell accent styling */
 .tuf-rgb-pill-active,
 .tuf-rgb-pill:checked,
 .tuf-rgb-pill.default {
-    background-color: #bde6fb !important;
-    border: 1px solid #bde6fb !important;
-    color: #161c1f !important;
-    font-weight: 700 !important;
-    box-shadow: none !important;
+    background-color: #3584e4;
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    font-weight: 700;
 }
 
 .tuf-rgb-pill-active:hover,
 .tuf-rgb-pill:checked:hover,
 .tuf-rgb-pill.default:hover {
-    background-color: #a9cee0 !important;
-    border-color: #a9cee0 !important;
-    color: #161c1f !important;
+    background-color: #468ee6;
+    color: #ffffff;
 }
 
 /* Speed Slider */

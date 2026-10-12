@@ -8,6 +8,7 @@ import {KeyboardColorManager} from './lib/hardwareManager.js';
 
 export default class TufRgbExtension extends Extension {
     enable() {
+        this.initTranslations();
         this._manager = new KeyboardColorManager(this);
     }
 
